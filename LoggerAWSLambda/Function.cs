@@ -3,7 +3,6 @@ using Amazon.DynamoDBv2.Model;
 using Amazon.Lambda.Core;
 using Amazon.Lambda.SQSEvents;
 using Amazon.SQS;
-using Amazon.SQS.Model;
 using Nest;
 using Newtonsoft.Json;
 using System.Collections.Concurrent;
@@ -17,7 +16,7 @@ namespace LoggerAWSLambda;
 
 public class LogMessage
 {
-    public string Message { get; set; }
+    public string? Message { get; set; }
     public DateTime TimeStamp { get; set; }
 }
 
@@ -213,6 +212,8 @@ public class Function
                 Console.WriteLine($"Failed to push log messages to Elasticsearch for session {sessionId}. Error: {bulkResponse.DebugInformation}");
             }
         }
+        // Configure the index lifecycle policy
+        await ConfigureIndexLifecyclePolicy(sessionId);
     }
 
     private static IElasticClient CreateElasticClient()
@@ -221,5 +222,22 @@ public class Function
         var settings = new ConnectionSettings(new Uri(connectionString));
         var elasticClient = new ElasticClient(settings);
         return elasticClient;
+    }
+
+    private async Task ConfigureIndexLifecyclePolicy(string indexName)
+    {
+        var updateIndexSettingsResponse = await _elasticClient.Indices.UpdateSettingsAsync(indexName, s => s
+            .IndexSettings(i => i
+                .Setting("index.lifecycle.name", "lifecycle_policy") // Set the name of your index lifecycle policy
+                .Setting("index.lifecycle.rollover_alias", indexName)
+                .Setting("index.lifecycle.parse_origination_date", true)
+            )
+        );
+
+        if (!updateIndexSettingsResponse.IsValid)
+        {
+            // Handle error if configuring the index lifecycle policy failed
+            Console.WriteLine($"Failed to configure the index lifecycle policy for index {indexName}. Error: {updateIndexSettingsResponse.DebugInformation}");
+        }
     }
 }
