@@ -25,7 +25,6 @@ namespace LoggerTest.Controllers
             try
             {
                 _logger.LogInformation("Test");
-                string sessionId = HttpContext.Session.Id;
                 return Enumerable.Range(1, 5).Select(index => new WeatherForecast
                 {
                     Date = DateTime.Now.AddDays(index),

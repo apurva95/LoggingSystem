@@ -9,12 +9,10 @@ namespace LoggerLibrary
     public class CustomLogger : ILogger
     {
         private readonly LoggerConfiguration _configuration;
-        private readonly ISessionIdProvider _sessionIdProvider;
         private static int count = 0;
-        public CustomLogger(LoggerConfiguration logger, ISessionIdProvider sessionIdProvider) 
+        public CustomLogger(LoggerConfiguration logger) 
         {
             _configuration = logger;
-            _sessionIdProvider = sessionIdProvider;
         }
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception exception, Func<TState, Exception, string> formatter)
         {
@@ -31,7 +29,6 @@ namespace LoggerLibrary
             var logMessage = formatter(state, exception);
 
             var logBuilder = new StringBuilder();
-            var sessionId = _sessionIdProvider.GetSessionId();
             if (!string.IsNullOrEmpty(logMessage))
             {
                 logBuilder.Append("\t[");
@@ -43,8 +40,8 @@ namespace LoggerLibrary
                 logBuilder.Append("\t[");
                 logBuilder.Append(eventId);
                 logBuilder.Append("]\t");
-                logBuilder.Append("\t[Session ID: ");
-                logBuilder.Append(string.IsNullOrEmpty(sessionId)?"Not established":sessionId);
+                logBuilder.Append("\t[User ID: ");
+                logBuilder.Append(string.IsNullOrEmpty("")?"Not established":"");
                 logBuilder.Append("]\t");
                 logBuilder.Append("\t[Message: ");
                 logBuilder.Append(logMessage);
@@ -57,14 +54,14 @@ namespace LoggerLibrary
                 logBuilder.AppendLine(exception.ToString());
             }
 
-            if (_configuration.LoggingMethod != 1 && !string.IsNullOrEmpty(sessionId))
+            if (_configuration.LoggingMethod != 1)
             {
                 //_ = LogMessageToQueue(sessionId, logBuilder, _configuration);
                 _ = LogMessageToQueue(logBuilder, _configuration);
             }
             else
             {
-                var logFilePath = GetLogFilePath(sessionId);
+                var logFilePath = GetLogFilePath("");
                 // Ensure the directory exists
                 var logDirectory = Path.GetDirectoryName(logFilePath);
                 if (!Directory.Exists(logDirectory))
@@ -188,10 +185,10 @@ namespace LoggerLibrary
             };
         }
 
-        private string GetLogFilePath(string sessionId)
+        private string GetLogFilePath(string userId)
         {
             // Set the desired log file path based on the session ID or any other identifier
-            return $"{_configuration.FilePath}/logs/{sessionId}.log";
+            return $"{_configuration.FilePath}/logs/{userId}.log";
         }
     }
 }

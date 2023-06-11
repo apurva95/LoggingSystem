@@ -56,7 +56,7 @@ public class Function
             var messageParts = logMessage.Split('|');
             // Extract the individual values from the message parts
             var currentTime = messageParts[0];
-            var sessionId = messageParts[1];
+            var registrationId = messageParts[1];
             var message = messageParts[2];
             var count = Convert.ToInt32(messageParts[3]);
             var time = Convert.ToInt32(messageParts[4]);
@@ -64,29 +64,29 @@ public class Function
             // Extract session ID from the log message or SQS message attributes
 
             // Add the log message to the queue for the corresponding session ID
-            if (!_logQueue.ContainsKey(sessionId))
+            if (!_logQueue.ContainsKey(registrationId))
             {
                 // Load the log queue from DynamoDB if it doesn't exist in memory
-                var loadedQueue = await LoadLogQueueFromDynamoDB(sessionId);
+                var loadedQueue = await LoadLogQueueFromDynamoDB(registrationId);
                 if (loadedQueue != null)
                 {
-                    _logQueue[sessionId] = loadedQueue;
+                    _logQueue[registrationId] = loadedQueue;
                 }
                 else
                 {
-                    _logQueue[sessionId] = new ConcurrentQueue<LogMessage>();
+                    _logQueue[registrationId] = new ConcurrentQueue<LogMessage>();
                 }
             }
             string format = "dd-MM-yyyy HH:mm:ss";
             DateTime dateTime = DateTime.ParseExact(currentTime, format, CultureInfo.InvariantCulture);
-            _logQueue[sessionId].Enqueue(new LogMessage { Message = message, TimeStamp = dateTime });
+            _logQueue[registrationId].Enqueue(new LogMessage { Message = message, TimeStamp = dateTime });
 
             // Save the updated log queue to DynamoDB
-            await SaveLogQueueToDynamoDB(sessionId);
+            await SaveLogQueueToDynamoDB(registrationId);
             // Determine if logs for the session should be processed and pushed to Elastic database
-            if (ShouldProcessLogs(sessionId, count, time))
+            if (ShouldProcessLogs(registrationId, count, time))
             {
-                await ProcessAndPushLogs(sessionId, sqsMessage);
+                await ProcessAndPushLogs(registrationId, sqsMessage);
             }
         }
 

@@ -34,6 +34,5 @@ app.UseCenteralizedLogger();
 // Configure the HTTP request pipeline.
 app.UseHttpsRedirection();
 app.UseAuthorization();
-app.UseSession();
 app.MapControllers();
 app.Run();
