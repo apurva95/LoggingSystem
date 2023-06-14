@@ -1,5 +1,4 @@
 ﻿using Microsoft.Extensions.Logging;
-using System.Collections.Concurrent;
 
 namespace LoggerLibrary
 {
@@ -14,7 +13,7 @@ namespace LoggerLibrary
         public ILogger CreateLogger(string categoryName)
         {
             //can be switheced via Factory -> Queue, Db, S3
-            return new CustomLogger(_configuration);
+            return new CustomLogger(_configuration, categoryName);
         }
 
         public void Dispose()

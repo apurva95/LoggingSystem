@@ -1,9 +1,11 @@
 ﻿using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
+using System.Diagnostics;
 using System.Net;
-using System.Threading.Tasks;
+using System.Reflection;
 
-namespace LoggerTest
+namespace LoggerLibrary
 {
     // You may need to install the Microsoft.AspNetCore.Http.Abstractions package into your project
     public class CenteralizedLogger
@@ -17,23 +19,22 @@ namespace LoggerTest
             _logger = logger;
         }
 
-        public Task Invoke(HttpContext httpContext)
+        public async Task Invoke(HttpContext httpContext)
         {
             try
             {
-                _logger.LogInformation(ex.Message);
-                return _next(httpContext);
+                await _next(httpContext);
             }
-            catch(Exception ex)
+            catch (Exception ex)
             {
-                _logger.LogCritical(ex.Message);
-                return Task.FromResult(HttpStatusCode.ServiceUnavailable);
+                _logger.LogCritical(ex, ex.Message);
+                httpContext.Response.StatusCode = (int)HttpStatusCode.ServiceUnavailable;
             }
         }
     }
 
     // Extension method used to add the middleware to the HTTP request pipeline.
-    public static class CentrlizedLoggerExtensions
+    public static class CentralizedLoggerExtensions
     {
         public static IApplicationBuilder UseCenteralizedLogger(this IApplicationBuilder builder)
         {

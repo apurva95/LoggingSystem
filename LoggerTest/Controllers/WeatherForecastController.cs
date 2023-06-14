@@ -12,7 +12,7 @@ namespace LoggerTest.Controllers
         "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
     };
 
-        private readonly ILogger<WeatherForecastController> _logger;
+        private readonly ILogger _logger;
 
         public WeatherForecastController(ILogger<WeatherForecastController> logger)
         {
@@ -22,9 +22,12 @@ namespace LoggerTest.Controllers
         [HttpGet]
         public IEnumerable<WeatherForecast> Get()
         {
+            int a = 0;
+            int b = 10 / a;
             try
             {
                 _logger.LogInformation("Test");
+                 Console.WriteLine("Test");
                 return Enumerable.Range(1, 5).Select(index => new WeatherForecast
                 {
                     Date = DateTime.Now.AddDays(index),
