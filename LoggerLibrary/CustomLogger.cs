@@ -21,10 +21,8 @@ namespace LoggerLibrary
         private static int count = 0;
         private readonly IElasticClient _elasticClient;
         private static string _categoryName = string.Empty;
-        private string _callingMethod;
-        public CustomLogger(LoggerConfiguration logger, string categoryName, [CallerMemberName] string callingMethod = "")
+        public CustomLogger(LoggerConfiguration logger, string categoryName)
         {
-            _callingMethod = callingMethod;
             _configuration = logger;
             _categoryName=categoryName;
             if (_logQueue == null)
@@ -67,7 +65,7 @@ namespace LoggerLibrary
             {
                 var firstMsg = logMessages.GetFirstItem().TimeStamp;
                 var secondMsg = logMessages.GetLastItem().TimeStamp;
-                return logMessages.Count == _configuration.Count || (secondMsg - firstMsg).Minutes == _configuration.Time;
+                return logMessages.Count == _configuration.Count || (secondMsg - firstMsg).Minutes >= _configuration.Time;
             }
             return false;
         }
@@ -145,8 +143,8 @@ namespace LoggerLibrary
                 logBuilder.Append("\t[Level:");
                 logBuilder.Append(GetShortLogLevel(logLevel) + ":");
                 logBuilder.Append("]\t");
-                logBuilder.Append("\t[User ID: ");
-                logBuilder.Append(string.IsNullOrEmpty("") ? "Not established" : "");
+                logBuilder.Append("\t[Calling File: ");
+                logBuilder.Append(_categoryName);
                 logBuilder.Append("]\t");
                 logBuilder.Append("\t[Message: ");
                 logBuilder.Append(logMessage);
