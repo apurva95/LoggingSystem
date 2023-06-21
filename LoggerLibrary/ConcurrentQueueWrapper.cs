@@ -10,7 +10,7 @@ namespace LoggerLibrary
 {
     public class ObservableConcurrentQueue<T> : IEnumerable<T>
     {
-        private readonly ConcurrentQueue<T> queue = new ConcurrentQueue<T>();
+        private readonly ConcurrentQueue<T> queue = new();
 
         public event EventHandler<QueueChangedEventArgs<T>> QueueChanged;
 
@@ -69,9 +69,10 @@ namespace LoggerLibrary
             return lastItem;
         }
 
-        protected virtual void OnQueueChanged(QueueChangedEventArgs<T> e)
+        protected virtual Task OnQueueChanged(QueueChangedEventArgs<T> e)
         {
             QueueChanged?.Invoke(this, e);
+            return Task.CompletedTask;
         }
 
         public IEnumerator<T> GetEnumerator()

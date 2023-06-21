@@ -5,12 +5,16 @@ using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 using System.Diagnostics;
 using ILogger = Microsoft.Extensions.Logging.ILogger;
 using System.Runtime.CompilerServices;
+using System.Text.RegularExpressions;
+using System.Linq.Expressions;
+using Elasticsearch.Net;
 
 namespace LoggerLibrary
 {
     public class LogMessage
     {
-        public StringBuilder? Message { get; set; }
+        public string? Level { get; set; }
+        public string? Message { get; set; }
         public DateTime TimeStamp { get; set; }
     }
 
@@ -21,38 +25,59 @@ namespace LoggerLibrary
         private static int count = 0;
         private readonly IElasticClient _elasticClient;
         private static string _categoryName = string.Empty;
+        private readonly Stopwatch _stopwatch = new();
+        private static readonly SemaphoreSlim _semaphore = new(1);
+        private static readonly object _fileLock = new object();
         public CustomLogger(LoggerConfiguration logger, string categoryName)
         {
             _configuration = logger;
-            _categoryName=categoryName;
-            if (_logQueue == null)
-            {
-                _logQueue = new ObservableConcurrentQueue<LogMessage>();
-            }
+            _categoryName = categoryName;
+            _logQueue ??= new ObservableConcurrentQueue<LogMessage>();
             _logQueue.QueueChanged += LogQueue_QueueChanged;
             _elasticClient = CreateElasticClient();
         }
 
-        private async void LogQueue_QueueChanged(object? sender, QueueChangedEventArgs<LogMessage> e)
+        private async void LogQueue_QueueChanged(object sender, QueueChangedEventArgs<LogMessage> e)
         {
             try
             {
-                if (sender!=null && ShouldProcessLogs(sender))
+                if (ShouldProcessLogs(sender))
                 {
-
-                    // Clone the log queue to avoid potential race conditions during processing
-                    var logMessages = new ObservableConcurrentQueue<LogMessage>(_logQueue);
-
-                    // Clear the original queue before pushing to ElasticDB
-                    await _logQueue.ClearAsync();
-
-                    await PushToElasticDB(logMessages);
+                    await _semaphore.WaitAsync();
+                    try
+                    {
+                        await ProcessLogQueueAsync();
+                    }
+                    finally
+                    {
+                        _semaphore.Release();
+                    }
                 }
-
             }
             catch (Exception ex)
             {
                 // Handle the exception (e.g., log the error, retry the operation, etc.)
+                Console.WriteLine($"Failed to push log messages to Elasticsearch. Error: {ex}");
+            }
+        }
+
+
+        private async Task ProcessLogQueueAsync()
+        {
+            try
+            {
+                ObservableConcurrentQueue<LogMessage> logMessages;
+
+                lock (_logQueue)
+                {
+                    logMessages = new ObservableConcurrentQueue<LogMessage>(_logQueue);
+                    _logQueue.ClearAsync();
+                }
+
+                await PushToElasticDB(logMessages);
+            }
+            catch (Exception ex)
+            {
                 Console.WriteLine($"Failed to push log messages to Elasticsearch. Error: {ex}");
             }
         }
@@ -63,62 +88,84 @@ namespace LoggerLibrary
             var logMessages = (ObservableConcurrentQueue<LogMessage>)sender;
             if (_configuration.Count != 0 || _configuration.Time != 0)
             {
-                var firstMsg = logMessages.GetFirstItem().TimeStamp;
-                var secondMsg = logMessages.GetLastItem().TimeStamp;
-                return logMessages.Count == _configuration.Count || (secondMsg - firstMsg).Minutes >= _configuration.Time;
+                return logMessages.Count == _configuration.Count || _stopwatch.Elapsed.TotalMinutes >= _configuration.Time;
             }
             return false;
         }
 
         private async Task PushToElasticDB(ObservableConcurrentQueue<LogMessage> logMessages)
         {
-            // Send log messages to the Elastic database using an ElasticClient instance
-            var bulkRequest = new BulkDescriptor();
-            var bulkResponse = await _elasticClient.BulkAsync(b => b
-                .Index(_configuration.UniqueID)
-                .IndexMany(logMessages, (bd, document) => bd
-                    .Document(document)
-                    .Routing(_configuration.UniqueID)
-                ));
-
-            if (!bulkResponse.IsValid)
+            if (logMessages.Count > 0)
             {
-                // Handle error if the bulk request failed
-                Console.WriteLine($"Failed to push log messages to Elasticsearch for registration id {_configuration.UniqueID}. Error: {bulkResponse.DebugInformation}");
+                Task<BulkResponse> bulkTask = null;
+                try
+                {
+                    lock (_elasticClient)
+                    {
+                        try
+                        {
+                            var healthResponse = _elasticClient.Cluster.Health();
+                            Console.WriteLine($"Cluster health: {healthResponse.Status}");
+                            // Send log messages to the Elastic database using an ElasticClient instance
+                            var bulkRequest = new BulkDescriptor();
+                            bulkTask = _elasticClient.BulkAsync(b => b
+                                .Index(_configuration.RegistrationID)
+                                .IndexMany(logMessages, (bd, document) => bd
+                                    .Document(document)
+                                    .Routing(_configuration.RegistrationID)
+                                ));
+                        }
+                        catch(Exception r)
+                        {
+
+                        }
+                    }
+
+
+                    var bulkResponse = await bulkTask;
+
+
+                    if (bulkResponse == null || !bulkResponse.IsValid)
+                    {
+                        // Handle error if the bulk request failed
+                        Console.WriteLine($"Failed to push log messages to Elasticsearch for registration id {_configuration.RegistrationID}. Error: {bulkResponse.DebugInformation}");
+                    }
+                }
+                catch (Exception e)
+                {
+
+                }
             }
         }
 
-
         private static IElasticClient CreateElasticClient()
         {
-            var connectionString = "http://localhost:9200";
+            var connectionString = "http://localhost:9200/";
             var settings = new ConnectionSettings(new Uri(connectionString));
             var elasticClient = new ElasticClient(settings);
             return elasticClient;
         }
 
-        private async Task ConfigureIndexLifecyclePolicy(string indexName)
-        {
-            var updateIndexSettingsResponse = await _elasticClient.Indices.UpdateSettingsAsync(indexName, s => s
-                .IndexSettings(i => i
-                    .Setting("index.lifecycle.name", "lifecycle_policy") // Set the name of your index lifecycle policy
-                    .Setting("index.lifecycle.rollover_alias", indexName)
-                    .Setting("index.lifecycle.parse_origination_date", true)
-                )
-            );
 
-            if (!updateIndexSettingsResponse.IsValid)
-            {
-                // Handle error if configuring the index lifecycle policy failed
-                Console.WriteLine($"Failed to configure the index lifecycle policy for index {indexName}. Error: {updateIndexSettingsResponse.DebugInformation}");
-            }
-        }
+        //private async Task ConfigureIndexLifecyclePolicy(string indexName)
+        //{
+        //    var updateIndexSettingsResponse = await _elasticClient.Indices.UpdateSettingsAsync(indexName, s => s
+        //        .IndexSettings(i => i
+        //            .Setting("index.lifecycle.name", "lifecycle_policy") // Set the name of your index lifecycle policy
+        //            .Setting("index.lifecycle.rollover_alias", indexName)
+        //            .Setting("index.lifecycle.parse_origination_date", true)
+        //        )
+        //    );
+
+        //    if (!updateIndexSettingsResponse.IsValid)
+        //    {
+        //        // Handle error if configuring the index lifecycle policy failed
+        //        Console.WriteLine($"Failed to configure the index lifecycle policy for index {indexName}. Error: {updateIndexSettingsResponse.DebugInformation}");
+        //    }
+        //}
 
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception exception, Func<TState, Exception, string> formatter)
         {
-            var (function, file, line) = ExtractMyFunctionAndLine(exception);
-
-            //TODO: create model, get session id, get information->Queue
             if (!IsEnabled(logLevel))
             {
                 return;
@@ -128,84 +175,113 @@ namespace LoggerLibrary
             {
                 throw new ArgumentNullException(nameof(formatter));
             }
-            var logMessage = formatter(state, exception);
-            var logBuilder = new StringBuilder();
-            var date = DateTime.UtcNow;
-            if (!string.IsNullOrEmpty(logMessage))
-            {
 
-                logBuilder.Append("\t[");
-                logBuilder.Append(++count);
-                logBuilder.Append("]\t");
-                logBuilder.Append("\t[TimeStamp");
-                logBuilder.Append(date);
-                logBuilder.Append('\t');
-                logBuilder.Append("\t[Level:");
-                logBuilder.Append(GetShortLogLevel(logLevel) + ":");
-                logBuilder.Append("]\t");
-                logBuilder.Append("\t[Calling File: ");
-                logBuilder.Append(_categoryName);
-                logBuilder.Append("]\t");
-                logBuilder.Append("\t[Message: ");
-                logBuilder.Append(logMessage);
-                logBuilder.Append("]\t");
-            }
-
-            if (exception != null)
-            {
-                // exception message
-                logBuilder.AppendLine(exception.ToString());
-            }
+            var logMessage = BuildLogMessage(logLevel, state, exception, formatter);
 
             if (_configuration.LoggingMethod.HasValue && _configuration.LoggingMethod != 1)
             {
-                //_ = LogMessageToQueue(sessionId, logBuilder, _configuration);
-                //_ = LogMessageToQueue(logBuilder, _configuration);
-                _logQueue.Enqueue(new LogMessage { Message = logBuilder, TimeStamp = date });
+                EnqueueLogMessage(logLevel, logMessage);
             }
             else
             {
                 var logFilePath = GetLogFilePath();
-                // Ensure the directory exists
-                var logDirectory = Path.GetDirectoryName(logFilePath);
-                if (!Directory.Exists(logDirectory))
+                lock (_fileLock)
                 {
-                    Directory.CreateDirectory(logDirectory);
+                    WriteLogToFile(logFilePath, logMessage);
+                    if (ShouldPerformLogRollover(logFilePath))
+                    {
+                        var newLogFilePath = GenerateNewLogFilePath(logFilePath);
+                        MoveLogFile(logFilePath, newLogFilePath);
+                        WriteLogToFile(logFilePath, string.Empty);
+                    }
                 }
-                // Append the message to the log file
-                File.AppendAllText(logFilePath, logBuilder.ToString());
-                // Implement rollover based on the Time and Count properties if required
-                if (_configuration.Time > 0 || _configuration.Count > 0)
-                {
-                    // Check if the log file needs to roll over based on the configured time or count limits
-                    bool shouldRollOver = false;
-                    if (_configuration.Time.HasValue && _configuration.Time > 0)
-                    {
-                        var fileInfo = new FileInfo(logFilePath);
-                        shouldRollOver = fileInfo.LastWriteTime.AddDays(_configuration.Time.Value) < DateTime.UtcNow;
-                    }
-                    if (!shouldRollOver && _configuration.Count > 0)
-                    {
-                        shouldRollOver = Directory.GetFiles(Path.GetDirectoryName(logFilePath)).Length >= _configuration.Count;
-                    }
+            }
+        }
 
-                    // Implement the rollover logic (e.g., create a new file, clear the existing file, etc.) based on your requirements
-                    if (shouldRollOver)
+        private static string BuildLogMessage<TState>(LogLevel logLevel, TState state, Exception exception, Func<TState, Exception, string> formatter)
+        {
+            var (function, _, line) = ExtractMyFunctionAndLine(exception);
+            var logBuilder = new StringBuilder();
+            var date = DateTime.UtcNow;
+
+            var countValue = (++count).ToString(); // Assuming `count` is the variable storing the count value
+
+            logBuilder.AppendLine($"[{countValue}] [TimeStamp: {date}] [Level: {GetShortLogLevel(logLevel)}] [Calling File: {_categoryName}] [Calling Method and Line: {function} {line}]");
+
+            if (state != null)
+            {
+                var logMessage = formatter(state, exception);
+                logBuilder.AppendLine($" [Message: {logMessage}]");
+            }
+
+            if (exception != null)
+            {
+                logBuilder.AppendLine(exception.ToString());
+            }
+
+            return logBuilder.ToString();
+        }
+
+        private static void EnqueueLogMessage(LogLevel logLevel, string logMessage)
+        {
+            _logQueue.Enqueue(new LogMessage { Level = GetShortLogLevel(logLevel), Message = logMessage, TimeStamp = DateTime.UtcNow });
+        }
+
+        private static void WriteLogToFile(string logFilePath, string logMessage)
+        {
+            File.AppendAllText(logFilePath, logMessage);
+        }
+
+        private bool ShouldPerformLogRollover(string logFilePath)
+        {
+            var fileInfo = new FileInfo(logFilePath);
+
+            if (_configuration.Time.HasValue && _configuration.Time > 0)
+            {
+                var lastWriteTimeUtc = fileInfo.LastWriteTime;
+                var rolloverTime = lastWriteTimeUtc.AddMinutes(_configuration.Time.Value);
+                if (rolloverTime < DateTime.Now)
+                {
+                    return true;
+                }
+            }
+
+            if (_configuration.Count > 0)
+            {
+                var logContent = File.ReadAllText(logFilePath);
+                var logEntries = logContent.Split(new[] { Environment.NewLine + "[" }, StringSplitOptions.RemoveEmptyEntries);
+                if (logEntries.Length > 0)
+                {
+                    var lastLogEntry = logEntries.LastOrDefault();
+                    if (!string.IsNullOrEmpty(lastLogEntry))
                     {
-                        // Example: Create a new log file with a timestamp in the name
-                        var newLogFilePath = Path.Combine(Path.GetDirectoryName(logFilePath), $"{Path.GetFileNameWithoutExtension(logFilePath)}_{DateTime.Now:yyyyMMddHHmmss}.log");
-                        File.Create(newLogFilePath).Dispose();
-                        // Example: Clear the existing log file
-                        // File.WriteAllText(logFilePath, string.Empty);
+                        var match = Regex.Match(lastLogEntry, @"^(\d+)\]");
+                        if (match.Success && match.Groups.Count > 1)
+                        {
+                            var numberValue = match.Groups[1].Value;
+                            if (int.TryParse(numberValue, out int number))
+                            {
+                                return count >= _configuration.Count;
+                            }
+                        }
                     }
                 }
             }
 
-            //string folder = @"C:\Temp\";
-            //string fileName = "CSharpCornerAuthors.txt";
-            //string fullPath = folder + fileName;
-            //using StreamWriter sw = File.AppendText(fullPath);
-            //sw.WriteLine(logBuilder);
+            return false;
+        }
+
+        private static void MoveLogFile(string sourceFilePath, string destinationFilePath)
+        {
+            File.Move(sourceFilePath, destinationFilePath);
+        }
+
+        private static string GenerateNewLogFilePath(string logFilePath)
+        {
+            var logDirectory = Path.GetDirectoryName(logFilePath);
+            var logFileName = Path.GetFileNameWithoutExtension(logFilePath);
+            var newLogFileName = $"{logFileName}_{DateTime.Now:yyyyMMddHHmmss}.log";
+            return Path.Combine(logDirectory, newLogFileName);
         }
 
         public bool IsEnabled(LogLevel logLevel)
@@ -235,10 +311,10 @@ namespace LoggerLibrary
         private string GetLogFilePath()
         {
             // Set the desired log file path based on the session ID or any other identifier
-            return $"{_configuration.FilePath}/logs/{_configuration.UniqueID}.log";
+            return $"{_configuration.FilePath}/logs/{_configuration.RegistrationID}.log";
         }
 
-        private (string function, string file, string line) ExtractMyFunctionAndLine(Exception error)
+        private static (string function, string file, string line) ExtractMyFunctionAndLine(Exception error)
         {
             if (error == null || error.StackTrace == null)
             {
@@ -275,7 +351,7 @@ namespace LoggerLibrary
                 {
                     // There's no space after the function. The stack line is likely "at MyCompany.Foobar.Blah()".
                     // This means there's no file or line number. Use only the function name.
-                    var function = FunctionWithoutNamespaces(bestFunction.Substring(atText.Length));
+                    var function = FunctionWithoutNamespaces(bestFunction[atText.Length..]);
                     return (function, string.Empty, string.Empty);
                 }
                 else
@@ -288,7 +364,7 @@ namespace LoggerLibrary
                     {
                         // We don't have a "line: 625" bit of text.
                         // We instead have "at MyCompany.FooBar.Blah() in c:\builds\foobar.cs"
-                        var file = FileWithoutPath(bestFunction.Substring(fileIndex));
+                        var file = FileWithoutPath(bestFunction[fileIndex..]);
                         return (function, file, string.Empty);
                     }
                     else

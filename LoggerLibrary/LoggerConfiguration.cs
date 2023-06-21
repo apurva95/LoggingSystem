@@ -6,6 +6,7 @@
         public int? Count { get; set; }
         public int? LoggingMethod { get; set; }
         public string? FilePath { get; set; }
-        public string? UniqueID { get; set; }
+        public string? RegistrationID { get; set; }
+        public string? EmailID { get; set; }
     }
 }

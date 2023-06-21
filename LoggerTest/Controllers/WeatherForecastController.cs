@@ -22,8 +22,8 @@ namespace LoggerTest.Controllers
         [HttpGet]
         public IEnumerable<WeatherForecast> Get()
         {
-            int a = 0;
-            int b = 10 / a;
+            //int a = 0;
+            //int b = 10 / a;
             try
             {
                 _logger.LogInformation("Test");
