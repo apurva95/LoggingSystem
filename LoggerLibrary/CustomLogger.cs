@@ -4,10 +4,7 @@ using Microsoft.Extensions.Logging;
 using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 using System.Diagnostics;
 using ILogger = Microsoft.Extensions.Logging.ILogger;
-using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
-using System.Linq.Expressions;
-using Elasticsearch.Net;
 
 namespace LoggerLibrary
 {
@@ -27,7 +24,7 @@ namespace LoggerLibrary
         private static string _categoryName = string.Empty;
         private readonly Stopwatch _stopwatch = new();
         private static readonly SemaphoreSlim _semaphore = new(1);
-        private static readonly object _fileLock = new object();
+        private static readonly object _fileLock = new();
         public CustomLogger(LoggerConfiguration logger, string categoryName)
         {
             _configuration = logger;
@@ -146,24 +143,6 @@ namespace LoggerLibrary
             return elasticClient;
         }
 
-
-        //private async Task ConfigureIndexLifecyclePolicy(string indexName)
-        //{
-        //    var updateIndexSettingsResponse = await _elasticClient.Indices.UpdateSettingsAsync(indexName, s => s
-        //        .IndexSettings(i => i
-        //            .Setting("index.lifecycle.name", "lifecycle_policy") // Set the name of your index lifecycle policy
-        //            .Setting("index.lifecycle.rollover_alias", indexName)
-        //            .Setting("index.lifecycle.parse_origination_date", true)
-        //        )
-        //    );
-
-        //    if (!updateIndexSettingsResponse.IsValid)
-        //    {
-        //        // Handle error if configuring the index lifecycle policy failed
-        //        Console.WriteLine($"Failed to configure the index lifecycle policy for index {indexName}. Error: {updateIndexSettingsResponse.DebugInformation}");
-        //    }
-        //}
-
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception exception, Func<TState, Exception, string> formatter)
         {
             if (!IsEnabled(logLevel))
@@ -206,8 +185,14 @@ namespace LoggerLibrary
 
             var countValue = (++count).ToString(); // Assuming `count` is the variable storing the count value
 
-            logBuilder.AppendLine($"[{countValue}] [TimeStamp: {date}] [Level: {GetShortLogLevel(logLevel)}] [Calling File: {_categoryName}] [Calling Method and Line: {function} {line}]");
-
+            if (!string.IsNullOrEmpty(function) && !string.IsNullOrEmpty(line))
+            {
+                logBuilder.AppendLine($"[TimeStamp: {date}] [Level: {GetShortLogLevel(logLevel)}] [Calling File: {_categoryName}]");
+            }
+            else
+            {
+                logBuilder.AppendLine($"[TimeStamp: {date}] [Level: {GetShortLogLevel(logLevel)}] [Calling File: {_categoryName}]");
+            }
             if (state != null)
             {
                 var logMessage = formatter(state, exception);
@@ -224,7 +209,7 @@ namespace LoggerLibrary
 
         private static void EnqueueLogMessage(LogLevel logLevel, string logMessage)
         {
-            _logQueue.Enqueue(new LogMessage { Level = GetShortLogLevel(logLevel), Message = logMessage, TimeStamp = DateTime.UtcNow });
+            _logQueue.Enqueue(new LogMessage { Level = GetShortLogLevel(logLevel), Message = logMessage, TimeStamp = DateTime.Now });
         }
 
         private static void WriteLogToFile(string logFilePath, string logMessage)
@@ -419,62 +404,3 @@ namespace LoggerLibrary
         public string FilePath { get; set; }
     }
 }
-
-#region Commented Code
-//public static async Task LogMessageToQueue(StringBuilder logMessage, LoggerConfiguration loggerConfiguration)
-//{
-//    try
-//    {
-//        var awsCredentials = new BasicAWSCredentials("AKIA5XCKO26FUZUKLTW7", "hP/NgUR2H9nIqn3ilanMHCbsdDV7iDTChGk7fNYv");
-//        var sqsConfig = new AmazonSQSConfig
-//        {
-//            RegionEndpoint = Amazon.RegionEndpoint.EUWest2 // Replace with your desired region
-//        };
-
-//        using var client = new AmazonSQSClient(awsCredentials, sqsConfig);
-//        var separator = "|";
-//        var msgbody = $"{DateTime.UtcNow}{separator}{loggerConfiguration.UniqueID}{separator}{logMessage}{separator}{loggerConfiguration.Count}{separator}{loggerConfiguration.Time}";
-//        var sendMessageRequest = new SendMessageRequest
-//        {
-//            QueueUrl = "https://sqs.eu-west-2.amazonaws.com/942901483403/LoggerQueue.fifo",
-//            MessageBody = msgbody,
-//            MessageGroupId = loggerConfiguration.UniqueID
-//        };
-
-//        await client.SendMessageAsync(sendMessageRequest);
-//    }
-//    catch (Exception)
-//    {
-
-//    }
-//}
-
-//public static async Task LogMessageToQueue(string sessionId, StringBuilder logMessage, LoggerConfiguration loggerConfiguration)
-//{
-//    try
-//    {
-//        var awsCredentials = new BasicAWSCredentials("AKIA5XCKO26FUZUKLTW7", "hP/NgUR2H9nIqn3ilanMHCbsdDV7iDTChGk7fNYv");
-//        var sqsConfig = new AmazonSQSConfig
-//        {
-//            RegionEndpoint = Amazon.RegionEndpoint.EUWest2 // Replace with your desired region
-//        };
-
-//        using var client = new AmazonSQSClient(awsCredentials, sqsConfig);
-//        var separator = "|";
-//        var msgbody = $"{DateTime.UtcNow}{separator}{sessionId}{separator}{logMessage}{separator}{loggerConfiguration.Count}{separator}{loggerConfiguration.Time}";
-//        var sendMessageRequest = new SendMessageRequest
-//        {
-//            QueueUrl = "https://sqs.eu-west-2.amazonaws.com/942901483403/LoggerQueue.fifo",
-//            MessageBody = msgbody,
-//            MessageGroupId = sessionId
-//        };
-
-//        await client.SendMessageAsync(sendMessageRequest);
-//    }
-//    catch (Exception)
-//    {
-
-//    }
-//}
-
-#endregion

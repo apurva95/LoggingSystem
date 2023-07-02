@@ -27,7 +27,8 @@ namespace LoggerTest.Controllers
             try
             {
                 _logger.LogInformation("Test");
-                 Console.WriteLine("Test");
+                _logger.LogError("Test Error");
+                Console.WriteLine("Test");
                 return Enumerable.Range(1, 5).Select(index => new WeatherForecast
                 {
                     Date = DateTime.Now.AddDays(index),
@@ -38,7 +39,7 @@ namespace LoggerTest.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex.Message);
+                _logger.LogCritical(ex.Message);
                 return new List<WeatherForecast>();
             }
         }
