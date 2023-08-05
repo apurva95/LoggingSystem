@@ -8,11 +8,9 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Session" Version="2.2.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="7.0.9" />
     <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="7.0.0" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\LoggerLibrary\LoggerLibrary.csproj" />
+    <PackageReference Include="testLoggerQmul" Version="1.0.0" />
   </ItemGroup>
 
 </Project>

@@ -5,6 +5,7 @@ using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 using System.Diagnostics;
 using ILogger = Microsoft.Extensions.Logging.ILogger;
 using System.Text.RegularExpressions;
+using System.Runtime.CompilerServices;
 
 namespace LoggerLibrary
 {
@@ -12,7 +13,74 @@ namespace LoggerLibrary
     {
         public string? Level { get; set; }
         public string? Message { get; set; }
+        public string? MessageForDoc { get; set; }
+        public string? LevelForDoc { get; set; }
         public DateTime TimeStamp { get; set; }
+        public string? CallingFile { get; set; }
+        public string? CallingMethod { get; set; }
+    }
+
+    public static class LoggerExtensions 
+    {
+        public static void LogInformation(this ILogger logger, string message,
+            [CallerMemberName] string memberName = "",
+            [CallerFilePath] string sourceFilePath = "",
+            [CallerLineNumber] int sourceLineNumber = 0)
+        {
+            var className = Path.GetFileNameWithoutExtension(sourceFilePath);
+            var formattedMessage = $"{memberName} Method was called with Message logged at line {sourceLineNumber}: [Message: {message}]";
+            logger.Log(LogLevel.Information, new EventId(), formattedMessage, null, (s, e) => s);
+        }
+
+        public static void LogError(this ILogger logger, string message,
+           [CallerMemberName] string memberName = "",
+           [CallerFilePath] string sourceFilePath = "",
+           [CallerLineNumber] int sourceLineNumber = 0)
+        {
+            var className = Path.GetFileNameWithoutExtension(sourceFilePath);
+            var formattedMessage = $"{memberName} Method was called in class {className} with message logged at line {sourceLineNumber}: {message}";
+            logger.Log(LogLevel.Information, new EventId(), formattedMessage, null, (s, e) => s);
+        }
+
+        public static void LogCritical(this ILogger logger, string message,
+           [CallerMemberName] string memberName = "",
+           [CallerFilePath] string sourceFilePath = "",
+           [CallerLineNumber] int sourceLineNumber = 0)
+        {
+            var className = Path.GetFileNameWithoutExtension(sourceFilePath);
+            var formattedMessage = $"{memberName} Method was called in class {className} with message logged at line {sourceLineNumber}: {message}";
+            logger.Log(LogLevel.Information, new EventId(), formattedMessage, null, (s, e) => s);
+        }
+
+        public static void LogWarning(this ILogger logger, string message,
+           [CallerMemberName] string memberName = "",
+           [CallerFilePath] string sourceFilePath = "",
+           [CallerLineNumber] int sourceLineNumber = 0)
+        {
+            var className = Path.GetFileNameWithoutExtension(sourceFilePath);
+            var formattedMessage = $"{memberName} Method was called in class {className} with message logged at line {sourceLineNumber}: {message}";
+            logger.Log(LogLevel.Information, new EventId(), formattedMessage, null, (s, e) => s);
+        }
+
+        public static void LogDebug(this ILogger logger, string message,
+           [CallerMemberName] string memberName = "",
+           [CallerFilePath] string sourceFilePath = "",
+           [CallerLineNumber] int sourceLineNumber = 0)
+        {
+            var className = Path.GetFileNameWithoutExtension(sourceFilePath);
+            var formattedMessage = $"{memberName} Method was called in class {className} with message logged at line {sourceLineNumber}: {message}";
+            logger.Log(LogLevel.Information, new EventId(), formattedMessage, null, (s, e) => s);
+        }
+
+        public static void LogTrace(this ILogger logger, string message,
+          [CallerMemberName] string memberName = "",
+          [CallerFilePath] string sourceFilePath = "",
+          [CallerLineNumber] int sourceLineNumber = 0)
+        {
+            var className = Path.GetFileNameWithoutExtension(sourceFilePath);
+            var formattedMessage = $"{memberName} Method was called in class {className} with message logged at line {sourceLineNumber}: {message}";
+            logger.Log(LogLevel.Trace, new EventId(), formattedMessage, null, (s, e) => s);
+        }
     }
 
     public class CustomLogger : ILogger
@@ -89,7 +157,7 @@ namespace LoggerLibrary
             }
             return false;
         }
-
+        
         private async Task PushToElasticDB(ObservableConcurrentQueue<LogMessage> logMessages)
         {
             if (logMessages.Count > 0)
@@ -112,7 +180,7 @@ namespace LoggerLibrary
                                     .Routing(_configuration.RegistrationID)
                                 ));
                         }
-                        catch(Exception r)
+                        catch (Exception r)
                         {
 
                         }
@@ -145,6 +213,7 @@ namespace LoggerLibrary
 
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception exception, Func<TState, Exception, string> formatter)
         {
+
             if (!IsEnabled(logLevel))
             {
                 return;
@@ -159,7 +228,7 @@ namespace LoggerLibrary
 
             if (_configuration.LoggingMethod.HasValue && _configuration.LoggingMethod != 1)
             {
-                EnqueueLogMessage(logLevel, logMessage);
+                EnqueueLogMessage(logMessage);
             }
             else
             {
@@ -171,18 +240,18 @@ namespace LoggerLibrary
                     {
                         var newLogFilePath = GenerateNewLogFilePath(logFilePath);
                         MoveLogFile(logFilePath, newLogFilePath);
-                        WriteLogToFile(logFilePath, string.Empty);
+                        WriteLogToFile(logFilePath, new());
                     }
                 }
             }
         }
 
-        private static string BuildLogMessage<TState>(LogLevel logLevel, TState state, Exception exception, Func<TState, Exception, string> formatter)
+        private static LogMessage BuildLogMessage<TState>(LogLevel logLevel, TState state, Exception exception, Func<TState, Exception, string> formatter)
         {
             var (function, _, line) = ExtractMyFunctionAndLine(exception);
             var logBuilder = new StringBuilder();
-            var date = DateTime.UtcNow;
-
+            var date = DateTime.Now;
+            string logMessage = string.Empty;
             var countValue = (++count).ToString(); // Assuming `count` is the variable storing the count value
 
             if (!string.IsNullOrEmpty(function) && !string.IsNullOrEmpty(line))
@@ -195,8 +264,9 @@ namespace LoggerLibrary
             }
             if (state != null)
             {
-                var logMessage = formatter(state, exception);
-                logBuilder.AppendLine($" [Message: {logMessage}]");
+                logMessage = formatter(state, exception);
+                //logBuilder.AppendLine($" [Message: {logMessage}]");
+                logBuilder.AppendLine(logMessage);
             }
 
             if (exception != null)
@@ -204,17 +274,18 @@ namespace LoggerLibrary
                 logBuilder.AppendLine(exception.ToString());
             }
 
-            return logBuilder.ToString();
+            return new LogMessage { TimeStamp = date, Level = GetShortLogLevel(logLevel), Message = logBuilder.ToString(), CallingFile = _categoryName, CallingMethod = function, MessageForDoc = logMessage};
         }
 
-        private static void EnqueueLogMessage(LogLevel logLevel, string logMessage)
+        private static void EnqueueLogMessage(LogMessage logMessage)
         {
-            _logQueue.Enqueue(new LogMessage { Level = GetShortLogLevel(logLevel), Message = logMessage, TimeStamp = DateTime.Now });
+            _logQueue.Enqueue(logMessage);
         }
 
-        private static void WriteLogToFile(string logFilePath, string logMessage)
+        private static void WriteLogToFile(string logFilePath, LogMessage logMessage)
         {
-            File.AppendAllText(logFilePath, logMessage);
+            string text = logMessage.TimeStamp + " " + logMessage.Level + " " + logMessage.CallingFile + " " + logMessage.CallingMethod + " " + logMessage.Message;
+            File.AppendAllText(logFilePath, text);
         }
 
         private bool ShouldPerformLogRollover(string logFilePath)
@@ -396,11 +467,5 @@ namespace LoggerLibrary
             return System.IO.Path.GetFileName(file);
         }
 
-    }
-
-    public class CallingMethod
-    {
-        public string MethodName { get; set; }
-        public string FilePath { get; set; }
     }
 }
