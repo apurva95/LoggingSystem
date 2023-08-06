@@ -39,7 +39,7 @@ namespace LoggerLibrary
         {
             var className = Path.GetFileNameWithoutExtension(sourceFilePath);
             var formattedMessage = $"{memberName} Method was called in class {className} with message logged at line {sourceLineNumber}: {message}";
-            logger.Log(LogLevel.Information, new EventId(), formattedMessage, null, (s, e) => s);
+            logger.Log(LogLevel.Error, new EventId(), formattedMessage, null, (s, e) => s);
         }
 
         public static void LogCritical(this ILogger logger, string message,
@@ -49,7 +49,7 @@ namespace LoggerLibrary
         {
             var className = Path.GetFileNameWithoutExtension(sourceFilePath);
             var formattedMessage = $"{memberName} Method was called in class {className} with message logged at line {sourceLineNumber}: {message}";
-            logger.Log(LogLevel.Information, new EventId(), formattedMessage, null, (s, e) => s);
+            logger.Log(LogLevel.Critical, new EventId(), formattedMessage, null, (s, e) => s);
         }
 
         public static void LogWarning(this ILogger logger, string message,
@@ -59,7 +59,7 @@ namespace LoggerLibrary
         {
             var className = Path.GetFileNameWithoutExtension(sourceFilePath);
             var formattedMessage = $"{memberName} Method was called in class {className} with message logged at line {sourceLineNumber}: {message}";
-            logger.Log(LogLevel.Information, new EventId(), formattedMessage, null, (s, e) => s);
+            logger.Log(LogLevel.Warning, new EventId(), formattedMessage, null, (s, e) => s);
         }
 
         public static void LogDebug(this ILogger logger, string message,
@@ -69,7 +69,7 @@ namespace LoggerLibrary
         {
             var className = Path.GetFileNameWithoutExtension(sourceFilePath);
             var formattedMessage = $"{memberName} Method was called in class {className} with message logged at line {sourceLineNumber}: {message}";
-            logger.Log(LogLevel.Information, new EventId(), formattedMessage, null, (s, e) => s);
+            logger.Log(LogLevel.Debug, new EventId(), formattedMessage, null, (s, e) => s);
         }
 
         public static void LogTrace(this ILogger logger, string message,
@@ -100,6 +100,7 @@ namespace LoggerLibrary
             _logQueue ??= new ObservableConcurrentQueue<LogMessage>();
             _logQueue.QueueChanged += LogQueue_QueueChanged;
             _elasticClient = CreateElasticClient();
+            _stopwatch.Start();
         }
 
         private async void LogQueue_QueueChanged(object sender, QueueChangedEventArgs<LogMessage> e)
@@ -136,6 +137,7 @@ namespace LoggerLibrary
                 lock (_logQueue)
                 {
                     logMessages = new ObservableConcurrentQueue<LogMessage>(_logQueue);
+                    _stopwatch.Restart();
                     _logQueue.ClearAsync();
                 }
 
