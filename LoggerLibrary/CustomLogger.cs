@@ -93,9 +93,11 @@ namespace LoggerLibrary
         private readonly Stopwatch _stopwatch = new();
         private static readonly SemaphoreSlim _semaphore = new(1);
         private static readonly object _fileLock = new();
+        private static string logFile = string.Empty;
         public CustomLogger(LoggerConfiguration logger, string categoryName)
         {
             _configuration = logger;
+            logFile = GetLogFilePath();
             _categoryName = categoryName;
             _logQueue ??= new ObservableConcurrentQueue<LogMessage>();
             _logQueue.QueueChanged += LogQueue_QueueChanged;
@@ -234,15 +236,13 @@ namespace LoggerLibrary
             }
             else
             {
-                var logFilePath = GetLogFilePath();
                 lock (_fileLock)
                 {
-                    WriteLogToFile(logFilePath, logMessage);
-                    if (ShouldPerformLogRollover(logFilePath))
+                    WriteLogToFile(logFile, logMessage);
+                    if (ShouldPerformLogRollover(logFile))
                     {
-                        var newLogFilePath = GenerateNewLogFilePath(logFilePath);
-                        MoveLogFile(logFilePath, newLogFilePath);
-                        WriteLogToFile(logFilePath, new());
+                        logFile = GenerateNewLogFilePath(logFile);
+                        WriteLogToFile(logFile, logMessage);
                     }
                 }
             }
@@ -258,7 +258,7 @@ namespace LoggerLibrary
 
             if (!string.IsNullOrEmpty(function) && !string.IsNullOrEmpty(line))
             {
-                logBuilder.AppendLine($"[TimeStamp: {date}] [Level: {GetShortLogLevel(logLevel)}] [Calling File: {_categoryName}]");
+                logBuilder.AppendLine($"[TimeStamp: {date}] [Level: {GetShortLogLevel(logLevel)}] [Calling File: {_categoryName}] [Function Name: {function}]");
             }
             else
             {
@@ -286,8 +286,7 @@ namespace LoggerLibrary
 
         private static void WriteLogToFile(string logFilePath, LogMessage logMessage)
         {
-            string text = logMessage.TimeStamp + " " + logMessage.Level + " " + logMessage.CallingFile + " " + logMessage.CallingMethod + " " + logMessage.Message;
-            File.AppendAllText(logFilePath, text);
+            File.AppendAllText(logFilePath, logMessage.Message);
         }
 
         private bool ShouldPerformLogRollover(string logFilePath)
@@ -296,45 +295,35 @@ namespace LoggerLibrary
 
             if (_configuration.Time.HasValue && _configuration.Time > 0)
             {
-                var lastWriteTimeUtc = fileInfo.LastWriteTime;
-                var rolloverTime = lastWriteTimeUtc.AddMinutes(_configuration.Time.Value);
-                if (rolloverTime < DateTime.Now)
+                var logContent = File.ReadAllText(logFilePath);
+                string pattern = @"\[TimeStamp: (\d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2})\]";
+                Match match = Regex.Match(logContent, pattern);
+
+                if (match.Success)
                 {
-                    return true;
+                    string fullTimestamp = match.Groups[1].Value;
+                    DateTime timestampDateTime = DateTime.ParseExact(fullTimestamp, "dd-MM-yyyy HH:mm:ss", null);
+                    var rolloverTime = timestampDateTime.AddMinutes(_configuration.Time.Value);
+                    if (rolloverTime < DateTime.Now)
+                    {
+                        return true;
+                    }
+
                 }
             }
 
             if (_configuration.Count > 0)
             {
                 var logContent = File.ReadAllText(logFilePath);
-                var logEntries = logContent.Split(new[] { Environment.NewLine + "[" }, StringSplitOptions.RemoveEmptyEntries);
-                if (logEntries.Length > 0)
-                {
-                    var lastLogEntry = logEntries.LastOrDefault();
-                    if (!string.IsNullOrEmpty(lastLogEntry))
-                    {
-                        var match = Regex.Match(lastLogEntry, @"^(\d+)\]");
-                        if (match.Success && match.Groups.Count > 1)
-                        {
-                            var numberValue = match.Groups[1].Value;
-                            if (int.TryParse(numberValue, out int number))
-                            {
-                                return count >= _configuration.Count;
-                            }
-                        }
-                    }
-                }
+                string pattern = @"\[TimeStamp";
+                count = Regex.Matches(logContent, pattern).Count;
+                return count >= _configuration.Count;
             }
 
             return false;
         }
 
-        private static void MoveLogFile(string sourceFilePath, string destinationFilePath)
-        {
-            File.Move(sourceFilePath, destinationFilePath);
-        }
-
-        private static string GenerateNewLogFilePath(string logFilePath)
+         private static string GenerateNewLogFilePath(string logFilePath)
         {
             var logDirectory = Path.GetDirectoryName(logFilePath);
             var logFileName = Path.GetFileNameWithoutExtension(logFilePath);
@@ -369,7 +358,7 @@ namespace LoggerLibrary
         private string GetLogFilePath()
         {
             // Set the desired log file path based on the session ID or any other identifier
-            return $"{_configuration.FilePath}/logs/{_configuration.RegistrationID}.log";
+            return $"{_configuration.FilePath}/{_configuration.RegistrationID}.log";
         }
 
         private static (string function, string file, string line) ExtractMyFunctionAndLine(Exception error)
